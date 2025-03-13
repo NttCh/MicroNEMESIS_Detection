@@ -18,6 +18,7 @@ from train import (
     continue_training
 )
 from inference import evaluate_model, display_sample_predictions, predict_test_folder
+from model import build_classifier, LitClassifier
 
 
 def main():
