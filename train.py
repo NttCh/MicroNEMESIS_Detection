@@ -17,7 +17,7 @@ import pandas as pd
 import os
 
 from data import PatchClassificationDataset, preview_data_before_after
-from models import build_classifier
+from model import build_classifier, LitClassifier
 from callbacks import (
     PlotMetricsCallback,
     OverallProgressCallback,
