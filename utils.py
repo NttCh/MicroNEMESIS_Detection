@@ -1,23 +1,24 @@
-"""
-Utility functions and miscellaneous helpers.
-"""
+#!/usr/bin/env python
+"""Utility functions."""
 
 import datetime
 import random
 import numpy as np
 import torch
+import importlib
 
 
-def thai_time() -> datetime.datetime:
-    """
-    Returns current UTC time shifted by +7 hours (Thai time).
-    """
+def thai_time():
+    """Return the current time in Thailand (UTC+7)."""
     return datetime.datetime.utcnow() + datetime.timedelta(hours=7)
 
 
-def set_random_seed(seed: int = 666) -> None:
+def set_seed(seed: int = 666) -> None:
     """
-    Set random seeds for reproducibility across numpy, torch, and random.
+    Set random seeds for reproducibility.
+
+    Args:
+        seed (int): The seed value to use.
     """
     random.seed(seed)
     np.random.seed(seed)
@@ -27,10 +28,16 @@ def set_random_seed(seed: int = 666) -> None:
 
 def load_obj(obj_path: str):
     """
-    Dynamically load a Python object from a string path, e.g. "torch.optim.AdamW".
+    Dynamically load an object by its string path.
+
+    Args:
+        obj_path (str): The module path in dot notation.
+
+    Returns:
+        Any: The loaded object (class, function, etc.).
     """
     parts = obj_path.split(".")
     module_path = ".".join(parts[:-1])
     obj_name = parts[-1]
-    module = __import__(module_path, fromlist=[obj_name])
+    module = importlib.import_module(module_path)
     return getattr(module, obj_name)
