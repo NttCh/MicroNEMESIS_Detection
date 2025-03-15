@@ -1,30 +1,34 @@
-"""
-Dataset definitions and data-related utilities.
-"""
+#!/usr/bin/env python
+"""Dataset and data-related utilities."""
 
 import os
 import cv2
 import random
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import torch
+import matplotlib.pyplot as plt
 from torch.utils.data import Dataset
-import albumentations as A
 from typing import Any, Tuple, Optional
-from omegaconf import DictConfig
+from utils import load_obj
 
 
 class PatchClassificationDataset(Dataset):
     """
-    A dataset class for patch classification. Loads images from a CSV file
-    and applies transformations.
+    Custom dataset for patch classification.
+
+    Args:
+        data (Any): DataFrame or path to CSV file containing filenames/labels.
+        image_dir (str): Path to the directory containing images.
+        transforms (Any): Albumentations transforms.
+        image_col (str): Column name for image filenames in the CSV/dataframe.
     """
+
     def __init__(
         self,
         data: Any,
         image_dir: str,
-        transforms: Optional[A.Compose] = None,
+        transforms: Optional[Any] = None,
         image_col: str = "filename"
     ) -> None:
         if isinstance(data, str):
@@ -35,12 +39,12 @@ class PatchClassificationDataset(Dataset):
         valid_rows = []
         for idx, row in df.iterrows():
             primary_path = os.path.join(image_dir, row[image_col])
-            alt_folder = image_dir.replace("Fa", "test")
-            alt_path = os.path.join(alt_folder, row[image_col])
-            if os.path.exists(primary_path) or os.path.exists(alt_path):
+            alternative_folder = image_dir.replace("Fa", "test")
+            alternative_path = os.path.join(alternative_folder, row[image_col])
+            if os.path.exists(primary_path) or os.path.exists(alternative_path):
                 valid_rows.append(row)
             else:
-                print(f"Warning: Image not found for row {idx}: {primary_path} or {alt_path}. Skipping.")
+                print(f"Warning: Image not found for row {idx}: {primary_path} or {alternative_path}. Skipping.")
 
         self.df = pd.DataFrame(valid_rows)
         self.image_dir = image_dir
@@ -48,25 +52,34 @@ class PatchClassificationDataset(Dataset):
         self.image_col = image_col
 
     def __len__(self) -> int:
+        """Return the length of the dataset."""
         return len(self.df)
 
     def __getitem__(self, idx: int) -> Tuple[Any, int]:
+        """
+        Get one sample of the dataset.
+
+        Args:
+            idx (int): Index of the sample.
+
+        Returns:
+            Tuple[Any, int]: (image tensor, label).
+        """
         row = self.df.iloc[idx]
         primary_path = os.path.join(self.image_dir, row[self.image_col])
-
         if os.path.exists(primary_path):
             image_path = primary_path
         else:
-            alt_folder = self.image_dir.replace("Fa", "test")
-            alt_path = os.path.join(alt_folder, row[self.image_col])
-            if os.path.exists(alt_path):
-                image_path = alt_path
+            alternative_folder = self.image_dir.replace("Fa", "test")
+            alternative_path = os.path.join(alternative_folder, row[self.image_col])
+            if os.path.exists(alternative_path):
+                image_path = alternative_path
                 print(f"Using alternative image path: {image_path}")
             else:
-                raise FileNotFoundError(f"Image not found: {primary_path} or {alt_path}")
+                raise FileNotFoundError(f"Image not found: {primary_path} or {alternative_path}")
 
-        image_bgr = cv2.imread(image_path, cv2.IMREAD_COLOR)
-        image = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
+        image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
 
         if self.transforms:
             augmented = self.transforms(image=image)
@@ -79,11 +92,17 @@ class PatchClassificationDataset(Dataset):
 def preview_data_before_after(
     train_df: pd.DataFrame,
     folder_path: str,
-    transform: A.Compose,
+    transform,
     n: int = 4
 ) -> None:
     """
-    Display sample images before and after augmentation.
+    Preview a few samples before and after augmentation.
+
+    Args:
+        train_df (pd.DataFrame): The training dataframe.
+        folder_path (str): Path to the folder containing images.
+        transform (Any): Albumentations transform for training.
+        n (int): Number of samples to preview.
     """
     indices = random.sample(range(len(train_df)), k=min(n, len(train_df)))
     fig, axs = plt.subplots(n, 2, figsize=(8, 4 * n))
@@ -94,6 +113,7 @@ def preview_data_before_after(
         image_bgr = cv2.imread(image_path, cv2.IMREAD_COLOR)
         if image_bgr is None:
             continue
+
         image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
         axs[i, 0].imshow(image_rgb.astype(np.uint8))
         axs[i, 0].set_title(f"Before Aug - Label: {row['label']}")
@@ -102,11 +122,14 @@ def preview_data_before_after(
         augmented = transform(image=image_rgb)
         image_aug = augmented["image"]
         if isinstance(image_aug, torch.Tensor):
+            # If needed, convert back to numpy for visualization
             image_aug = image_aug.permute(1, 2, 0).cpu().numpy()
+            image_aug = image_aug.astype(np.uint8)
 
-        axs[i, 1].imshow(image_aug.astype(np.uint8))
+        axs[i, 1].imshow(image_aug)
         axs[i, 1].set_title(f"After Aug - Label: {row['label']}")
         axs[i, 1].axis("off")
 
     plt.tight_layout()
-    plt.show()
+    plt.savefig("preview_augmentations.png")
+    plt.close()
