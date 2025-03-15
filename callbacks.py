@@ -1,37 +1,53 @@
-"""
-Callback definitions for PyTorch Lightning training.
-"""
+#!/usr/bin/env python
+"""Custom PyTorch Lightning Callbacks."""
 
 import os
-import pandas as pd
+import copy
 import torch
+import pandas as pd
 import matplotlib.pyplot as plt
-from pytorch_lightning.callbacks import Callback, EarlyStopping, ModelCheckpoint
+from typing import Optional, List
+import pytorch_lightning as pl
+from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.callbacks.progress import TQDMProgressBar
-from sklearn.metrics import (accuracy_score, precision_score, recall_score,
-                             fbeta_score)
-import seaborn as sns
+from torch import nn
+from sklearn.metrics import accuracy_score, precision_score, recall_score, fbeta_score
 import openpyxl
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
+from config import BASE_SAVE_DIR
+from utils import thai_time
+import numpy as np
 
 
 class CleanTQDMProgressBar(TQDMProgressBar):
-    """
-    A custom TQDM progress bar that does not leave the bar after each epoch.
-    """
+    """A TQDM progress bar that does not leave previous bars behind."""
+
     def init_train_tqdm(self):
+        """Initialize the training progress bar."""
         bar = super().init_train_tqdm()
         bar.leave = False
         return bar
 
 
-class TrialFoldProgressCallback(Callback):
+class TrialFoldProgressCallback(pl.Callback):
     """
-    A callback to display trial/fold progress at the start of training.
+    Callback to print trial/fold progress in a multi-trial, multi-fold setting.
+
+    Args:
+        trial_number (int): Current trial number.
+        total_trials (int): Total number of trials.
+        fold_number (int): Current fold number.
+        total_folds (int): Total number of folds.
     """
-    def __init__(self, trial_number=None, total_trials=None,
-                 fold_number=None, total_folds=None):
+
+    def __init__(
+        self,
+        trial_number: Optional[int] = None,
+        total_trials: Optional[int] = None,
+        fold_number: Optional[int] = None,
+        total_folds: Optional[int] = None
+    ):
         super().__init__()
         self.trial_number = trial_number
         self.total_trials = total_trials
@@ -39,6 +55,7 @@ class TrialFoldProgressCallback(Callback):
         self.total_folds = total_folds
 
     def on_train_start(self, trainer, pl_module):
+        """Called when training starts."""
         msgs = []
         if self.trial_number is not None and self.total_trials is not None:
             msgs.append(f"Trial {self.trial_number}/{self.total_trials}")
@@ -48,54 +65,42 @@ class TrialFoldProgressCallback(Callback):
             print(" | ".join(msgs))
 
 
-class PlotMetricsCallback(Callback):
+class PlotMetricsCallback(pl.Callback):
     """
-    A callback to plot training and validation metrics at the end of training.
-    """
-    def __init__(self):
-        super().__init__()
-        self.epochs = []
-        self.train_losses = []
-        self.val_losses = []
-        self.train_accs = []
-        self.val_accs = []
-        self.val_recalls = []
+    Callback to plot training/validation metrics at the end of training.
 
-    def on_validation_epoch_end(self, trainer, pl_module):
+    Args:
+        save_dir (str): Directory to save the plot.
+    """
+
+    def __init__(self, save_dir: Optional[str] = None) -> None:
+        super().__init__()
+        self.save_dir = save_dir
+        self.epochs: List[int] = []
+        self.train_losses: List[float] = []
+        self.val_losses: List[float] = []
+        self.val_recalls: List[float] = []
+
+    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        """Called at the end of each validation epoch."""
         epoch = trainer.current_epoch + 1
         self.epochs.append(epoch)
+
         train_loss = trainer.callback_metrics.get("train_loss")
         val_loss = trainer.callback_metrics.get("val_loss")
-        train_acc = trainer.callback_metrics.get("train_acc")
-        val_acc = trainer.callback_metrics.get("val_acc")
         val_recall = trainer.callback_metrics.get("val_recall")
 
-        if train_loss is not None:
-            self.train_losses.append(train_loss.item())
-        else:
-            self.train_losses.append(float('nan'))
+        self.train_losses.append(train_loss.item() if train_loss else float('nan'))
+        self.val_losses.append(val_loss.item() if val_loss else float('nan'))
+        self.val_recalls.append(val_recall.item() if val_recall else float('nan'))
 
-        if val_loss is not None:
-            self.val_losses.append(val_loss.item())
-        else:
-            self.val_losses.append(float('nan'))
+    def on_train_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        """Called at the end of training."""
+        global BASE_SAVE_DIR
+        if self.save_dir is None:
+            self.save_dir = os.path.join(BASE_SAVE_DIR, "plots")
+        os.makedirs(self.save_dir, exist_ok=True)
 
-        if train_acc is not None:
-            self.train_accs.append(train_acc.item())
-        else:
-            self.train_accs.append(float('nan'))
-
-        if val_acc is not None:
-            self.val_accs.append(val_acc.item())
-        else:
-            self.val_accs.append(float('nan'))
-
-        if val_recall is not None:
-            self.val_recalls.append(val_recall.item())
-        else:
-            self.val_recalls.append(float('nan'))
-
-    def on_train_end(self, trainer, pl_module):
         fig, axs = plt.subplots(1, 2, figsize=(12, 4))
         axs[0].plot(self.epochs, self.train_losses, label="Train Loss", marker="o")
         axs[0].plot(self.epochs, self.val_losses, label="Validation Loss", marker="o")
@@ -113,43 +118,43 @@ class PlotMetricsCallback(Callback):
         axs[1].grid(True)
 
         plt.tight_layout()
-        save_path = os.path.join(trainer.logger.log_dir, "metrics_plot.png")
+        save_path = os.path.join(self.save_dir, "metrics_plot.png")
         plt.savefig(save_path)
+        plt.close()
         print(f"[PlotMetricsCallback] Saved metrics plot to {save_path}")
-        plt.show()
 
 
-class OverallProgressCallback(Callback):
-    """
-    A callback to display overall epoch progress at the start of each epoch.
-    """
-    def on_train_start(self, trainer, pl_module):
+class OverallProgressCallback(pl.Callback):
+    """Callback to display overall progress (epoch out of total epochs)."""
+
+    def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        """Called at the start of training."""
         self.total_epochs = trainer.max_epochs
 
-    def on_epoch_start(self, trainer, pl_module):
+    def on_epoch_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        """Called at the start of each epoch."""
         epoch = trainer.current_epoch + 1
         remaining = self.total_epochs - trainer.current_epoch
-        print(f"[OverallProgressCallback] Epoch {epoch}/{self.total_epochs} "
-              f"- Remaining epochs: {remaining}")
+        print(f"[OverallProgress] Epoch {epoch}/{self.total_epochs} - Remaining: {remaining}")
 
 
-class MasterValidationMetricsCallback(Callback):
+class MasterValidationMetricsCallback(pl.Callback):
     """
-    A callback to record validation metrics (loss, acc, prec, recall, f2) in an Excel file.
+    Callback to compute and log validation metrics (accuracy, precision, recall, F2)
+    into an Excel file after each validation epoch.
     """
+
     def __init__(self, base_dir: str, fold_number=None):
         super().__init__()
         self.excel_path = os.path.join(base_dir, "all_eval_metrics.xlsx")
         self.fold_number = fold_number if fold_number is not None else 0
         self.rows = []
 
-    def on_validation_epoch_end(self, trainer, pl_module):
+    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        """Called at the end of each validation epoch."""
         pl_module.eval()
-        val_loader = trainer.val_dataloaders[0]
-        all_preds = []
-        all_labels = []
-        all_loss = 0.0
-        count = 0
+        val_loader = trainer.val_dataloaders[0] if isinstance(trainer.val_dataloaders, list) else trainer.val_dataloaders
+        all_preds, all_labels, all_loss, count = [], [], 0.0, 0
         criterion = nn.CrossEntropyLoss()
 
         with torch.no_grad():
@@ -169,8 +174,8 @@ class MasterValidationMetricsCallback(Callback):
         prec = precision_score(all_labels, all_preds, average='weighted', zero_division=0)
         rec = recall_score(all_labels, all_preds, average='weighted', zero_division=0)
         f2 = fbeta_score(all_labels, all_preds, beta=2, average='weighted', zero_division=0)
-        epoch = trainer.current_epoch + 1
 
+        epoch = trainer.current_epoch + 1
         row = {
             'fold': self.fold_number,
             'epoch': epoch,
@@ -183,7 +188,8 @@ class MasterValidationMetricsCallback(Callback):
         self.rows.append(row)
         pl_module.train()
 
-    def on_train_end(self, trainer, pl_module):
+    def on_train_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        """Called at the end of training."""
         if os.path.exists(self.excel_path):
             old_df = pd.read_excel(self.excel_path)
             new_df = pd.DataFrame(self.rows)
@@ -192,4 +198,31 @@ class MasterValidationMetricsCallback(Callback):
             combined = pd.DataFrame(self.rows)
 
         combined.to_excel(self.excel_path, index=False)
-        print(f"[MasterValidationMetricsCallback] Logged validation metrics to {self.excel_path}")
+        print(f"[MasterValidationMetricsCallback] Logged evaluation metrics to {self.excel_path}")
+
+
+class OptunaCompositeReportingCallback(pl.Callback):
+    """
+    Callback to report a composite metric (val_recall - val_loss * beta) to Optuna and handle pruning.
+    """
+
+    def __init__(self, trial, cfg):
+        super().__init__()
+        self.trial = trial
+        self.cfg = cfg
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        """Called at the end of each validation epoch."""
+        val_recall = trainer.callback_metrics.get("val_recall")
+        val_loss = trainer.callback_metrics.get("val_loss")
+
+        if val_recall is not None and val_loss is not None:
+            alpha = self.cfg.training.composite_metric.alpha
+            beta_ = self.cfg.training.composite_metric.beta
+            composite = alpha * val_recall.item() - beta_ * val_loss.item()
+            self.trial.report(composite, step=trainer.current_epoch)
+
+            # If the trial should be pruned, raise an exception.
+            from optuna.exceptions import TrialPruned
+            if self.trial.should_prune():
+                raise TrialPruned()
