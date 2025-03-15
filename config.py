@@ -1,17 +1,16 @@
-"""
-Configuration dictionary and methods for loading config.
-"""
+#!/usr/bin/env python
+"""Configuration settings and global variables."""
 
-import datetime
-import random
-import torch
-import numpy as np
+import os
 from omegaconf import OmegaConf, DictConfig
 
-CONFIG_DICT = {
-    "stage_detection": True,
+CFG_DICT = {
+    "run_mode": "train",  # "train" or "test"
+    "tuning_mode": True,  # If True, tuning mode is active (pretrained_ckpt is ignored)
+    "use_cv": True,       # If True, use cross-validation
+    "use_optuna": True,   # If True, Optuna hyperparameter tuning is activated
     "general": {
-        "save_dir": "baclogs3",
+        "save_dir": "baclogs4-3",
         "project_name": "bacteria"
     },
     "trainer": {
@@ -23,11 +22,12 @@ CONFIG_DICT = {
     "training": {
         "seed": 666,
         "mode": "max",
-        "tuning_epochs_detection": 10,
-        "additional_epochs_detection": 10,
+        "tuning_epochs_detection": 2,
+        "additional_epochs_detection": 2,
         "cross_validation": True,
         "num_folds": 2,
-        "repeated_cv": 3
+        "repeated_cv": 3,
+        "composite_metric": {"alpha": 1.0, "beta": 0.1}
     },
     "optimizer": {
         "class_name": "torch.optim.AdamW",
@@ -66,51 +66,28 @@ CONFIG_DICT = {
     "augmentation": {
         "train": {
             "augs": [
-                {
-                    "class_name": "albumentations.Resize",
-                    "params": {"height": 400, "width": 400, "p": 1.0}
-                },
-                {
-                    "class_name": "albumentations.Rotate",
-                    "params": {"limit": 10, "p": 0.5}
-                },
-                {
-                    "class_name": "albumentations.ColorJitter",
-                    "params": {"brightness": 0.1, "contrast": 0.1, "p": 0.1}
-                },
-                {
-                    "class_name": "albumentations.Normalize",
-                    "params": {}
-                },
-                {
-                    "class_name": "albumentations.pytorch.transforms.ToTensorV2",
-                    "params": {"p": 1.0}
-                }
+                {"class_name": "albumentations.Resize", "params": {"height": 400, "width": 400, "p": 1.0}},
+                {"class_name": "albumentations.Rotate", "params": {"limit": 10, "p": 0.5}},
+                {"class_name": "albumentations.ColorJitter", "params": {"brightness": 0.1, "contrast": 0.1, "p": 0.1}},
+                {"class_name": "albumentations.Normalize", "params": {}},
+                {"class_name": "albumentations.pytorch.transforms.ToTensorV2", "params": {"p": 1.0}}
             ]
         },
         "valid": {
             "augs": [
-                {
-                    "class_name": "albumentations.Resize",
-                    "params": {"height": 400, "width": 400, "p": 1.0}
-                },
-                {
-                    "class_name": "albumentations.Normalize",
-                    "params": {}
-                },
-                {
-                    "class_name": "albumentations.pytorch.transforms.ToTensorV2",
-                    "params": {"p": 1.0}
-                }
+                {"class_name": "albumentations.Resize", "params": {"height": 400, "width": 400, "p": 1.0}},
+                {"class_name": "albumentations.Normalize", "params": {}},
+                {"class_name": "albumentations.pytorch.transforms.ToTensorV2", "params": {"p": 1.0}}
             ]
         }
     },
     "test": {
-        "folder_path": "None"
+        "folder_path": "/kaggle/input/bacdataset/Data/Test"
     },
+    "test_csv": "None",
+    "pretrained_ckpt": "/kaggle/working/baclogs3/20250315/best_model/best_detection.ckpt",
     "optuna": {
-        "use_optuna": True,
-        "n_trials": 20,
+        "n_trials": 2,
         "params": {
             "lr": {"min": 1e-5, "max": 1e-3, "type": "loguniform"},
             "batch_size": {"values": [4, 8], "type": "categorical"},
@@ -119,13 +96,10 @@ CONFIG_DICT = {
             "rotation_limit": {"min": 5, "max": 15, "type": "int"},
             "color_jitter_strength": {"min": 0.1, "max": 0.3, "type": "float"}
         }
-    },
-    "pretrained_ckpt": "None"
+    }
 }
 
+cfg: DictConfig = OmegaConf.create(CFG_DICT)
 
-def get_config() -> DictConfig:
-    """
-    Return the default configuration as a DictConfig object.
-    """
-    return OmegaConf.create(CONFIG_DICT)
+# This variable is used as a global path to save logs/checkpoints.
+BASE_SAVE_DIR = None
